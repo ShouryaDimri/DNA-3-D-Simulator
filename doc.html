@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive 3D DNA Explorer</title>
+    <style>
+        /* General Body and Page Styling */
+        body {
+            margin: 0;
+            overflow-x: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #f0f0f0;
+            background-color: #0a0a0a;
+        }
+
+        /* Canvas for Three.js rendering */
+        #three-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            outline: none;
+            z-index: 1;
+        }
+
+        /* Loading Screen */
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a0a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.5s ease-out;
+            opacity: 1;
+        }
+        #loading-screen.hidden {
+            opacity: 0;
+        }
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-left-color: #00ffff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Tooltip for hover information */
+        #tooltip {
+            position: fixed;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 5px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 50;
+            font-size: 14px;
+            max-width: 250px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        #tooltip.visible {
+            opacity: 1;
+        }
+
+        /* On-screen controls */
+        #controls-container {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+        #controls-container button {
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        #controls-container button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        #controls-container button:active {
+            transform: scale(0.95);
+        }
+
+        /* Content wrapper for scrolling text */
+        .content-wrapper {
+            position: relative;
+            z-index: 5;
+            pointer-events: none; /* Allows mouse interaction with the canvas */
+        }
+        
+        /* Individual content sections */
+        .content-section {
+            height: 100vh; /* Each section takes up the full viewport height */
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 0 5vw;
+        }
+        .section-content {
+            background: rgba(10, 10, 10, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 400px;
+            opacity: 0;
+            transform: translateX(20px);
+            transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+            pointer-events: all; /* Re-enable pointer events for text content */
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .section-content.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .section-content h2 {
+            margin-top: 0;
+            color: #00ffff;
+        }
+        .section-content p {
+            line-height: 1.6;
+        }
+        
+        /* Styling for the Information Panel */
+        #info-panel {
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        #info-panel.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .info-panel-content {
+            background-color: #1e1e1e;
+            color: #f1f1f1;
+            padding: 25px;
+            border: 1px solid #444;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 500px;
+            position: relative;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        #info-panel.visible .info-panel-content {
+            transform: scale(1);
+        }
+
+        #info-panel-title {
+            margin-top: 0;
+            color: #00ffff;
+        }
+
+        #info-panel-close {
+            color: #aaa;
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #info-panel-close:hover {
+            color: #fff;
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="three-canvas"></canvas>
+
+    <div id="loading-screen">
+        <div class="loader"></div>
+    </div>
+    
+    <div id="tooltip"></div>
+
+    <div id="info-panel">
+        <div class="info-panel-content">
+            <span id="info-panel-close">&times;</span>
+            <h2 id="info-panel-title">Component Info</h2>
+            <p id="info-panel-description">Details will appear here.</p>
+        </div>
+    </div>
+    
+    <div id="controls-container">
+        <button id="pause-btn" title="Pause/Play Animation">⏸️</button>
+        <button id="wireframe-btn" title="Toggle Wireframe Mode">🌐</button>
+        <button id="reset-btn" title="Reset Camera">🔄</button>
+    </div>
+    
+    <div class="content-wrapper">
+        <section class="content-section">
+            <div class="section-content">
+                <h2>The Double Helix</h2>
+                <p>Scroll down to begin a journey through the structure of DNA. The iconic double helix forms the backbone of life's genetic code.</p>
+            </div>
+        </section>
+        <section class="content-section">
+            <div class="section-content">
+                <h2>Base Pairs</h2>
+                <p>The "rungs" of the DNA ladder are made of four nucleobases: Adenine (A), Thymine (T), Guanine (G), and Cytosine (C).</p>
+            </div>
+        </section>
+        <section class="content-section">
+            <div class="section-content">
+                <h2>Interactive Exploration</h2>
+                <p>You can freely explore the model. Drag any component to learn more about it. Use the controls at the bottom to pause or view in wireframe mode.</p>
+            </div>
+        </section>
+        <div style="height: 50vh;"></div> </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/ScrollTrigger.min.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        
+        gsap.registerPlugin(ScrollTrigger);
+        
+        class DNAExplorer {
+            constructor() {
+                // Core Three.js components
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.controls = null;
+                
+                // DNA structure components
+                this.dnaGroup = null;
+                this.dnaStrands = [];
+                this.basePairs = [];
+                this.backbones = [];
+                
+                // Animation and interaction
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+                this.tooltip = null;
+                this.hoveredObject = null;
+                
+                // Dragging and Info Panel state
+                this.draggedObject = null;
+                this.isDragging = false;
+                this.infoPanel = null;
+                
+                // Control states
+                this.isAnimationPaused = false;
+                this.isWireframeMode = false;
+                this.animationSpeed = 1;
+                
+                // Camera journey points for scroll-based movement
+                this.cameraPoints = [
+                    { position: { x: 0, y: 0, z: 15 }, lookAt: { x: 0, y: 0, z: 0 } },
+                    { position: { x: 5, y: 5, z: 10 }, lookAt: { x: 0, y: 0, z: 0 } },
+                    { position: { x: 8, y: 0, z: 5 }, lookAt: { x: 0, y: 0, z: 0 } },
+                    { position: { x: 3, y: -3, z: 8 }, lookAt: { x: 0, y: -2, z: 0 } },
+                    { position: { x: -5, y: 2, z: 6 }, lookAt: { x: 0, y: 0, z: 0 } },
+                    { position: { x: 0, y: 8, z: 4 }, lookAt: { x: 0, y: 0, z: 0 } },
+                    { position: { x: 0, y: 0, z: 12 }, lookAt: { x: 0, y: 0, z: 0 } }
+                ];
+                
+                this.init();
+            }
+            
+            async init() {
+                try {
+                    this.setupScene();
+                    this.setupCamera();
+                    this.setupRenderer();
+                    this.setupLighting();
+                    this.setupControls();
+                    this.createDNAStructure();
+                    this.setupEventListeners();
+                    this.setupScrollAnimation();
+                    this.createParticleSystem();
+                    this.startAnimation();
+                    
+                    setTimeout(() => {
+                        this.hideLoadingScreen();
+                    }, 2000);
+                    
+                } catch (error) {
+                    console.error('Error initializing DNA Explorer:', error);
+                }
+            }
+            
+            setupScene() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x0a0a0a);
+                this.scene.fog = new THREE.Fog(0x0a0a0a, 20, 100);
+            }
+            
+            setupCamera() {
+                this.camera = new THREE.PerspectiveCamera(
+                    75,
+                    window.innerWidth / window.innerHeight,
+                    0.1,
+                    1000
+                );
+                this.camera.position.set(0, 0, 15);
+            }
+            
+            setupRenderer() {
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: document.getElementById('three-canvas'),
+                    antialias: true,
+                    alpha: true
+                });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            }
+            
+            setupLighting() {
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(10, 10, 5);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                this.scene.add(directionalLight);
+                
+                const accentLight1 = new THREE.PointLight(0x00ffff, 0.5, 20);
+                accentLight1.position.set(-5, 5, 5);
+                this.scene.add(accentLight1);
+                
+                const accentLight2 = new THREE.PointLight(0xff00ff, 0.5, 20);
+                accentLight2.position.set(5, -5, 5);
+                this.scene.add(accentLight2);
+            }
+            
+            setupControls() {
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+                this.controls.minDistance = 3;
+                this.controls.maxDistance = 30;
+                this.controls.maxPolarAngle = Math.PI;
+            }
+            
+            createDNAStructure() {
+                this.dnaGroup = new THREE.Group();
+                
+                const helixHeight = 20;
+                const helixRadius = 2;
+                const turns = 3;
+                const basePairsPerTurn = 10;
+                const totalBasePairs = turns * basePairsPerTurn;
+                
+                const materials = this.createDNAMaterials();
+                
+                this.createBackbones(helixHeight, helixRadius, turns, materials.backbone);
+                this.createBasePairs(helixHeight, helixRadius, totalBasePairs, materials);
+                
+                this.scene.add(this.dnaGroup);
+                this.dnaGroup.position.set(0, -helixHeight / 2, 0);
+            }
+            
+            createDNAMaterials() {
+                return {
+                    backbone: new THREE.MeshPhongMaterial({
+                        color: 0x888888,
+                        shininess: 100,
+                        transparent: true,
+                        opacity: 0.9
+                    }),
+                    adenine: new THREE.MeshPhongMaterial({
+                        color: 0xff6b6b,
+                        shininess: 100,
+                        emissive: 0x331111
+                    }),
+                    thymine: new THREE.MeshPhongMaterial({
+                        color: 0x4834d4,
+                        shininess: 100,
+                        emissive: 0x111133
+                    }),
+                    guanine: new THREE.MeshPhongMaterial({
+                        color: 0x00d2d3,
+                        shininess: 100,
+                        emissive: 0x003333
+                    }),
+                    cytosine: new THREE.MeshPhongMaterial({
+                        color: 0xff9ff3,
+                        shininess: 100,
+                        emissive: 0x331133
+                    }),
+                    bond: new THREE.LineBasicMaterial({
+                        color: 0xffff00,
+                        transparent: true,
+                        opacity: 0.8
+                    })
+                };
+            }
+            
+            createBackbones(height, radius, turns, material) {
+                const points1 = [];
+                const points2 = [];
+                const segments = 200;
+                
+                for (let i = 0; i <= segments; i++) {
+                    const t = i / segments;
+                    const angle = t * turns * Math.PI * 2;
+                    const y = t * height;
+                    
+                    points1.push(new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius));
+                    points2.push(new THREE.Vector3(Math.cos(angle + Math.PI) * radius, y, Math.sin(angle + Math.PI) * radius));
+                }
+                
+                const curve1 = new THREE.CatmullRomCurve3(points1);
+                const curve2 = new THREE.CatmullRomCurve3(points2);
+                
+                const tubeGeometry1 = new THREE.TubeGeometry(curve1, 100, 0.15, 8, false);
+                const tubeGeometry2 = new THREE.TubeGeometry(curve2, 100, 0.15, 8, false);
+                
+                const backbone1 = new THREE.Mesh(tubeGeometry1, material);
+                const backbone2 = new THREE.Mesh(tubeGeometry2, material);
+                
+                backbone1.userData = { type: 'backbone', description: 'Sugar-phosphate backbone - provides structural support' };
+                backbone2.userData = { type: 'backbone', description: 'Sugar-phosphate backbone - provides structural support' };
+                
+                this.backbones.push(backbone1, backbone2);
+                this.dnaGroup.add(backbone1, backbone2);
+            }
+            
+            createBasePairs(height, radius, totalBasePairs, materials) {
+                const baseTypes = ['A', 'T', 'G', 'C'];
+                const basePairings = { 'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G' };
+                const baseMaterials = { 'A': materials.adenine, 'T': materials.thymine, 'G': materials.guanine, 'C': materials.cytosine };
+                
+                for (let i = 0; i < totalBasePairs; i++) {
+                    const t = i / totalBasePairs;
+                    const angle = t * 3 * Math.PI * 2;
+                    const y = t * height;
+                    
+                    const base1Type = baseTypes[Math.floor(Math.random() * baseTypes.length)];
+                    const base2Type = basePairings[base1Type];
+                    
+                    const baseGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+                    
+                    const base1Position = new THREE.Vector3(Math.cos(angle) * (radius - 0.5), y, Math.sin(angle) * (radius - 0.5));
+                    const base2Position = new THREE.Vector3(Math.cos(angle + Math.PI) * (radius - 0.5), y, Math.sin(angle + Math.PI) * (radius - 0.5));
+                    
+                    const base1 = new THREE.Mesh(baseGeometry, baseMaterials[base1Type]);
+                    const base2 = new THREE.Mesh(baseGeometry, baseMaterials[base2Type]);
+                    
+                    base1.position.copy(base1Position);
+                    base2.position.copy(base2Position);
+                    
+                    base1.userData = { type: 'base', baseType: base1Type, description: this.getBaseDescription(base1Type) };
+                    base2.userData = { type: 'base', baseType: base2Type, description: this.getBaseDescription(base2Type) };
+                    
+                    this.basePairs.push(base1, base2);
+                    this.dnaGroup.add(base1, base2);
+                    
+                    this.createHydrogenBond(base1Position, base2Position, materials.bond);
+                }
+            }
+            
+            createHydrogenBond(pos1, pos2, material) {
+                const points = [pos1, pos2];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const bond = new THREE.Line(geometry, material);
+                bond.userData = { type: 'bond', description: 'Hydrogen bond - holds base pairs together' };
+                this.dnaGroup.add(bond);
+            }
+            
+            getBaseDescription(baseType) {
+                const descriptions = {
+                    'A': 'Adenine - Purine base, pairs with Thymine (2 H-bonds)',
+                    'T': 'Thymine - Pyrimidine base, pairs with Adenine (2 H-bonds)',
+                    'G': 'Guanine - Purine base, pairs with Cytosine (3 H-bonds)',
+                    'C': 'Cytosine - Pyrimidine base, pairs with Guanine (3 H-bonds)'
+                };
+                return descriptions[baseType] || 'DNA base';
+            }
+
+            createParticleSystem() {
+                const particleCount = 200;
+                const particles = new THREE.BufferGeometry();
+                const positions = new Float32Array(particleCount * 3);
+                const colors = new Float32Array(particleCount * 3);
+
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    positions[i3] = (Math.random() - 0.5) * 100;
+                    positions[i3 + 1] = (Math.random() - 0.5) * 100;
+                    positions[i3 + 2] = (Math.random() - 0.5) * 100;
+
+                    const hue = Math.random() * 0.3 + 0.5;
+                    const color = new THREE.Color().setHSL(hue, 1, 0.5);
+                    colors[i3] = color.r;
+                    colors[i3 + 1] = color.g;
+                    colors[i3 + 2] = color.b;
+                }
+
+                particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+                const particleMaterial = new THREE.PointsMaterial({
+                    size: 0.1,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.6
+                });
+
+                const particleSystem = new THREE.Points(particles, particleMaterial);
+                this.scene.add(particleSystem);
+            }
+            
+            setupEventListeners() {
+                window.addEventListener('resize', () => this.onWindowResize());
+                
+                const canvas = this.renderer.domElement;
+                canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
+                canvas.addEventListener('mousedown', (event) => this.onMouseDown(event));
+                canvas.addEventListener('mouseup', (event) => this.onMouseUp(event));
+                
+                document.getElementById('pause-btn').addEventListener('click', () => this.toggleAnimation());
+                document.getElementById('wireframe-btn').addEventListener('click', () => this.toggleWireframe());
+                document.getElementById('reset-btn').addEventListener('click', () => this.resetCamera());
+                
+                this.tooltip = document.getElementById('tooltip');
+                
+                this.infoPanel = document.getElementById('info-panel');
+                document.getElementById('info-panel-close').addEventListener('click', () => this.hideInfoPanel());
+            }
+
+            onMouseDown(event) {
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const intersects = this.raycaster.intersectObjects(this.dnaGroup.children);
+
+                if (intersects.length > 0) {
+                    this.isDragging = true;
+                    this.draggedObject = intersects[0].object;
+                    this.controls.enabled = false;
+                }
+            }
+
+            onMouseUp(event) {
+                if (this.isDragging && this.draggedObject) {
+                    this.showInfoPanel(this.draggedObject);
+                }
+                
+                this.isDragging = false;
+                this.draggedObject = null;
+                this.controls.enabled = true;
+            }
+            
+            onMouseMove(event) {
+                if (this.isDragging) return;
+
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const intersects = this.raycaster.intersectObjects(this.dnaGroup.children);
+                
+                if (intersects.length > 0) {
+                    const object = intersects[0].object;
+                    if (this.hoveredObject !== object && object.userData.description) {
+                        this.hoveredObject = object;
+                        this.showTooltip(event.clientX, event.clientY, object.userData.description);
+                    }
+                } else {
+                    if (this.hoveredObject) {
+                        this.hoveredObject = null;
+                        this.hideTooltip();
+                    }
+                }
+            }
+
+            showInfoPanel(object) {
+                if (!object.userData || !object.userData.description) return;
+
+                const { type, baseType, description } = object.userData;
+                
+                let title = 'DNA Component';
+                if (type === 'base') {
+                    title = baseType === 'A' ? 'Adenine' : baseType === 'T' ? 'Thymine' : baseType === 'G' ? 'Guanine' : 'Cytosine';
+                } else if (type === 'backbone') {
+                    title = 'Sugar-Phosphate Backbone';
+                } else if (type === 'bond') {
+                    title = 'Hydrogen Bond';
+                }
+                
+                document.getElementById('info-panel-title').textContent = title;
+                document.getElementById('info-panel-description').textContent = description;
+                this.infoPanel.classList.add('visible');
+            }
+
+            hideInfoPanel() {
+                this.infoPanel.classList.remove('visible');
+            }
+            
+            setupScrollAnimation() {
+                const sections = document.querySelectorAll('.content-section');
+                
+                sections.forEach((section) => {
+                    const content = section.querySelector('.section-content');
+                    
+                    ScrollTrigger.create({
+                        trigger: section,
+                        start: 'top 80%',
+                        end: 'bottom 20%',
+                        onEnter: () => content.classList.add('visible'),
+                        onLeave: () => content.classList.remove('visible'),
+                        onEnterBack: () => content.classList.add('visible'),
+                        onLeaveBack: () => content.classList.remove('visible')
+                    });
+                });
+                
+                ScrollTrigger.create({
+                    trigger: '.content-wrapper',
+                    start: 'top top',
+                    end: 'bottom bottom',
+                    scrub: 1,
+                    onUpdate: (self) => {
+                        const progress = self.progress;
+                        const pointIndex = Math.floor(progress * (this.cameraPoints.length - 1));
+                        const nextPointIndex = Math.min(pointIndex + 1, this.cameraPoints.length - 1);
+                        const localProgress = (progress * (this.cameraPoints.length - 1)) % 1;
+                        
+                        if (this.cameraPoints[pointIndex] && this.cameraPoints[nextPointIndex]) {
+                            const currentPoint = this.cameraPoints[pointIndex];
+                            const nextPoint = this.cameraPoints[nextPointIndex];
+                            
+                            this.camera.position.x = THREE.MathUtils.lerp(currentPoint.position.x, nextPoint.position.x, localProgress);
+                            this.camera.position.y = THREE.MathUtils.lerp(currentPoint.position.y, nextPoint.position.y, localProgress);
+                            this.camera.position.z = THREE.MathUtils.lerp(currentPoint.position.z, nextPoint.position.z, localProgress);
+                            
+                            this.controls.target.x = THREE.MathUtils.lerp(currentPoint.lookAt.x, nextPoint.lookAt.x, localProgress);
+                            this.controls.target.y = THREE.MathUtils.lerp(currentPoint.lookAt.y, nextPoint.lookAt.y, localProgress);
+                            this.controls.target.z = THREE.MathUtils.lerp(currentPoint.lookAt.z, nextPoint.lookAt.z, localProgress);
+                            
+                            this.controls.update();
+                        }
+                    }
+                });
+            }
+            
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+            
+            showTooltip(x, y, text) {
+                this.tooltip.textContent = text;
+                this.tooltip.style.left = x + 10 + 'px';
+                this.tooltip.style.top = y + 10 + 'px';
+                this.tooltip.classList.add('visible');
+            }
+            
+            hideTooltip() {
+                this.tooltip.classList.remove('visible');
+            }
+            
+            toggleAnimation() {
+                this.isAnimationPaused = !this.isAnimationPaused;
+                const btn = document.getElementById('pause-btn');
+                btn.textContent = this.isAnimationPaused ? '▶️' : '⏸️';
+            }
+            
+            toggleWireframe() {
+                this.isWireframeMode = !this.isWireframeMode;
+                
+                this.dnaGroup.children.forEach(child => {
+                    if (child.material && !(child instanceof THREE.Line)) {
+                        child.material.wireframe = this.isWireframeMode;
+                    }
+                });
+                
+                const btn = document.getElementById('wireframe-btn');
+                btn.style.background = this.isWireframeMode ? 'rgba(0, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.7)';
+            }
+            
+            resetCamera() {
+                gsap.to(this.camera.position, {
+                    duration: 1.5,
+                    x: 0,
+                    y: 0,
+                    z: 15,
+                    ease: 'power2.inOut'
+                });
+                
+                gsap.to(this.controls.target, {
+                    duration: 1.5,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    ease: 'power2.inOut'
+                });
+            }
+            
+            hideLoadingScreen() {
+                const loadingScreen = document.getElementById('loading-screen');
+                loadingScreen.classList.add('hidden');
+                
+                setTimeout(() => {
+                    loadingScreen.style.display = 'none';
+                }, 500);
+            }
+            
+            startAnimation() {
+                const clock = new THREE.Clock();
+
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    const elapsedTime = clock.getElapsedTime();
+                    
+                    if (!this.isAnimationPaused && this.dnaGroup) {
+                        this.dnaGroup.rotation.y += 0.005 * this.animationSpeed;
+                        this.dnaGroup.rotation.z = Math.sin(elapsedTime * 0.5) * 0.05;
+                    }
+                    
+                    this.controls.update();
+                    this.renderer.render(this.scene, this.camera);
+                };
+                
+                animate();
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            new DNAExplorer();
+        });
+    </script>
+</body>
+</html>
